@@ -17,15 +17,13 @@ request_lock = threading.Lock()
 # 引入请求计数器和时间记录
 request_count = 0
 last_request_time = time.time()
-
 timeframes = ['15m','30m' '1H', '2H', '4H']
-
 
 instIds = ["BTC","ETH","XRP","SOL","DOGE","BCH","LDO","GALA","GRASS","PEPE",
            "PYTH","SHIB","SUI","TRB","UNI","PNUT","LINK","MEME","MEW","MKR",
            "NEIRO","ORDI","WLD","LTC","YGG","INJ","SATS","AAVE","ETC","OP",
            "SUSHI","NEAR","AR","SSV","MASK","BONK","BSV","SAND","DYDX","CORE"]
-
+# instIds = ["BTC"]
 api_key = "531e1af3-6266-4f8e-8966-151414344866"
 secret_key = "5609668625511F975ECB08E4B950A339"
 passphrase = "Csh6290."
@@ -88,9 +86,10 @@ def api_request_worker(instId,bar):
         logging.info("处理K线数据"+instId+":"+bar)
         df1 = pd.DataFrame(final_results,
                             columns=['timestamp', 'open', 'high', 'low', 'close', 'vol', 'volCcy', 'volCcyQuote', 'confirm'])
-        que_result = df1.query('confirm!= "0"')
-        que_result['close'] = que_result['close'].astype(float)  # 将收盘价转换为浮点数
-        df = que_result.iloc[::-1]
+        # 使用 .loc 避免 SettingWithCopyWarning
+        condition = df1['confirm'] != "0"
+        df = df1.loc[condition].iloc[::-1].copy()
+        df.loc[:, 'close'] = df['close'].astype(float)  # 将收盘价转换为浮点数
         # 本周期和 3/4/6 倍 Macd
         dif, dea, macd = talib.MACD(df['close'], fastperiod=12, slowperiod=26, signalperiod=9)
         dif1, dea1, macd1 = talib.MACD(df['close'], fastperiod=36, slowperiod=78, signalperiod=27)
@@ -118,19 +117,19 @@ def api_request_worker(instId,bar):
         buy = ((dea >= 0) | ((dif > 0) & (dea <= 0))) & is_near_zero & golden_cross & (
                 (dif1 > dea1) & ((dif2 > dea2) | (dif3 > dea3) | ((dif2 > dea2) & (dif3 > dea3))))
         # 输出结果
-        df['sell'] = sell
-        df['buy'] = buy
+        df.loc[:, 'sell'] = sell
+        df.loc[:, 'buy'] = buy
         # 检查最新的一条记录的 sell1 或 buy1 是否为 True
         latest_sell = df['sell'].iloc[-1]
         latest_buy = df['buy'].iloc[-1]
         ts = timestamp_to_string(df['timestamp'].iloc[-1])
         if latest_sell:
             # 发送 sell 信号的 webhook
-            payload = ts+"｜"+instId+"｜"+bar+"｜空"
+            payload = f"{ts}｜{instId}｜{bar}｜空"
             sendMsg(payload)
         elif latest_buy:
             # 发送 buy 信号的 webhook
-            payload = ts+"｜"+instId+"｜"+bar+"｜多"
+            payload = f"{ts}｜{instId}｜{bar}｜多"
             sendMsg(payload)
         else:
             logging.info("无信号发送")
@@ -156,7 +155,7 @@ def sendMsg(content):
         response.raise_for_status()
         logging.info(f"发送 {content} 信号提醒. Response: {response.status_code}")
     except requests.exceptions.RequestException as e:
-        logging.info(f"消息发送失败 {content} 信号提醒异常. Response: {e}")
+        logging.error(f"消息发送失败 {content} 信号提醒异常. Response: {e}")
 
 
 def timestamp_to_string(string_timestamp):
